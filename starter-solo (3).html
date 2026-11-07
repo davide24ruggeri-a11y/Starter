@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Starter Solo – Blocchi</title>
+<style>
+:root{--bg:#f4f5f7;--fg:#14171c;--card:#fff;--mut:#6b7380;--acc:#e8481c;--ok:#1a9a55;--bad:#d62b3a;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1216;--fg:#eef1f5;--card:#1a1f26;--mut:#8b94a1;--acc:#ff6a3d;--ok:#3ccf82;--bad:#ff5a67}}
+:root[data-theme="dark"]{--bg:#0f1216;--fg:#eef1f5;--card:#1a1f26;--mut:#8b94a1;--acc:#ff6a3d;--ok:#3ccf82;--bad:#ff5a67}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:480px;margin:0 auto;padding:16px}
+h1{font-size:18px;margin:0 0 12px;letter-spacing:.5px}
+.stat{background:var(--card);border-radius:18px;padding:28px 12px;text-align:center;border:3px solid transparent;transition:.15s}
+#big{font-size:38px;font-weight:800;letter-spacing:1px}#sub{color:var(--mut);margin-top:4px;min-height:22px}
+.marks{border-color:#e6b800}.set{border-color:var(--bad)}.go{border-color:var(--ok);background:var(--ok);color:#fff}.go #sub{color:#fff}
+.row{display:flex;gap:10px;margin:12px 0}
+button{flex:1;font:inherit;font-weight:700;padding:16px;border:0;border-radius:14px;background:var(--acc);color:#fff}
+button.sec{background:var(--card);color:var(--fg);border:1px solid var(--mut);flex:.5}
+.res{display:flex;gap:8px}.res div{flex:1;background:var(--card);border-radius:14px;padding:10px;text-align:center}
+.res b{display:block;font-size:26px}small,.note{color:var(--mut);font-size:12px}
+.meter{height:8px;background:var(--card);border-radius:4px;margin:14px 0 4px;overflow:hidden}#bar{display:block;height:100%;width:0;background:var(--acc)}
+ol{padding-left:22px;margin:10px 0}li.bad{color:var(--bad)}
+details{background:var(--card);border-radius:14px;padding:10px 14px;margin:10px 0}summary{font-weight:700}
+label{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:10px 0;font-size:14px}
+input{width:80px;font:inherit;padding:6px;border-radius:8px;border:1px solid var(--mut);background:var(--bg);color:var(--fg)}
+</style></head><body><main>
+<h1>⏱ STARTER SOLO</h1>
+<div id="stat" class="stat"><div id="big">Pronto</div><div id="sub">Premi Avvia</div></div>
+<div class="row"><button id="go">Avvia</button><button id="stop" class="sec">Stop</button></div>
+<div class="res"><div><b id="last">—</b><small>ultimo (ms)</small></div><div><b id="best">—</b><small>migliore</small></div><div><b id="avg">—</b><small>media</small></div></div>
+<div class="meter"><i id="bar"></i></div><small id="msg">Sensore non attivo</small><br><small id="dbg"></small>
+<ol id="hist"></ol>
+<details><summary>Impostazioni</summary>
+<label>Attesa prima di iniziare (s)<input id="pre" type="number" step="1" min="0"></label>
+<label>“On your marks” → “Set”: min (s)<input id="mMin" type="number" step="0.5" min="2"></label>
+<label>“On your marks” → “Set”: max (s)<input id="mMax" type="number" step="0.5" min="2"></label>
+<label>“Set” → sparo: media (s)<input id="fp" type="number" step="0.05" min="1.5" max="2.3"></label>
+<label>Sensibilità sensore (m/s², più basso = più sensibile)<input id="sens" type="number" step="0.1" min="0.1"></label>
+<label>Compensazione latenza (ms)<input id="off" type="number" step="5"></label>
+<button class="sec" id="clr" style="width:100%;margin-top:6px">Azzera storico</button>
+</details>
+<p class="note">Appoggia il telefono sul blocco (o contro la pedana) con lo schermo in su. La barra mostra l’urto rilevato dal sensore: prova a colpire il blocco e regola la sensibilità. Sotto i 100 ms dallo sparo la partenza è considerata falsa (regola World Athletics). Per evitare che il suono dello sparo faccia vibrare il telefono, usa uno speaker Bluetooth o cuffie.</p>
+</main>
+<script>
+const $=i=>document.getElementById(i),sleep=ms=>new Promise(r=>setTimeout(r,Math.max(0,ms)));
+const D={pre:5,mMin:6,mMax:10,fp:1.78,sens:0.8,off:0};let S={...D},H=[];
+try{Object.assign(S,JSON.parse(localStorage.getItem('ss_s')||'{}'));H=JSON.parse(localStorage.getItem('ss_h')||'[]')}catch(e){}
+const save=()=>{try{localStorage.setItem('ss_s',JSON.stringify(S));localStorage.setItem('ss_h',JSON.stringify(H.slice(-50)))}catch(e){}};
+Object.keys(D).forEach(k=>{const el=$(k);el.value=S[k];el.onchange=()=>{const v=parseFloat(el.value);S[k]=isNaN(v)?D[k]:v;save()}});
+let blank=0,ev=0,nul=0,peak=0,ctx,runId=0,gunPerf=null,setT=0,done=true,motionOn=false,prev=null,nodes=[],wake=null;
+function dbg(){$('dbg').textContent='Diagnostica: '+(window.isSecureContext?'HTTPS ok':'contesto NON sicuro')+', in un riquadro: '+(window.top!==window.self?'sì':'no')+', eventi sensore: '+ev+' (vuoti: '+nul+')'}
+function ui(big,sub,cls){$('big').textContent=big;$('sub').textContent=sub||'';$('stat').className='stat '+(cls||'')}
+function initAudio(){if(!ctx)ctx=new(window.AudioContext||window.webkitAudioContext)();if(ctx.state==='suspended')ctx.resume()}
+function say(text){return new Promise(res=>{let t0=null;const u=new SpeechSynthesisUtterance(text);u.lang='en-GB';u.rate=.9;
+u.onstart=()=>{t0=performance.now();res(t0)};u.onerror=()=>res(performance.now());speechSynthesis.cancel();speechSynthesis.speak(u);
+setTimeout(()=>{if(t0===null){t0=performance.now();res(t0)}},1200)})}
+function playGun(atPerf){const when=ctx.currentTime+Math.max(0,(atPerf-performance.now())/1000),sr=ctx.sampleRate;
+const buf=ctx.createBuffer(1,sr*.5,sr),d=buf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*Math.exp(-i/(sr*.05));
+const src=ctx.createBufferSource();src.buffer=buf;const g=ctx.createGain();g.gain.value=1;src.connect(g).connect(ctx.destination);src.start(when);
+const o=ctx.createOscillator(),og=ctx.createGain();o.frequency.setValueAtTime(900,when);o.frequency.exponentialRampToValueAtTime(120,when+.08);
+og.gain.setValueAtTime(.5,when);og.gain.exponentialRampToValueAtTime(.001,when+.12);o.connect(og).connect(ctx.destination);o.start(when);o.stop(when+.15);
+nodes=[src,o];return performance.now()+(when-ctx.currentTime)*1000+(ctx.outputLatency||ctx.baseLatency||0)*1000}
+const gauss=(m,s)=>m+s*Math.sqrt(-2*Math.log(1-Math.random()))*Math.cos(2*Math.PI*Math.random());
+function abort(){runId++;done=true;gunPerf=null;speechSynthesis.cancel();nodes.forEach(n=>{try{n.stop()}catch(e){}})}
+async function enableMotion(){if(motionOn)return;
+try{if(typeof DeviceMotionEvent!=='undefined'&&typeof DeviceMotionEvent.requestPermission==='function'){if(await DeviceMotionEvent.requestPermission()!=='granted'){$('msg').textContent='Permesso sensore negato: provo comunque ad ascoltare'}}
+addEventListener('devicemotion',onMotion);motionOn=true;$('msg').textContent='Sensore in attesa di dati…';
+setTimeout(()=>{dbg();if(!prev)$('msg').textContent=window.top!==window.self?'Pagina in un riquadro: i sensori sono bloccati. Aprila come file o da un sito tuo.':ev?'Il browser invia eventi vuoti: consenti i sensori di movimento per il sito (Chrome > Impostazioni sito).':'Nessun evento dal sensore: sensori non supportati o bloccati.'},2000)}catch(e){$('msg').textContent='Sensore non disponibile: sequenza solo audio'}}
+function onMotion(e){ev++;const a=e.accelerationIncludingGravity;if(!a||a.x==null){nul++;return}const now=performance.now();let t=e.timeStamp;if(!(t>0)||Math.abs(t-now)>250)t=now;
+if(prev){const d=Math.hypot(a.x-prev.x,a.y-prev.y,a.z-prev.z);if(gunPerf!==null&&t>=gunPerf)peak=Math.max(peak,d);$('bar').style.width=Math.min(100,d/S.sens*50)+'%';
+if(d>S.sens&&!done&&setT){
+if(gunPerf===null||t<gunPerf){if(t>setT+800){nodes.forEach(n=>{try{n.stop()}catch(e){}});finish('early',null)}}
+else if(t>=gunPerf+90)finish('ok',t-gunPerf-S.off);else blank=1}}
+prev={x:a.x,y:a.y,z:a.z};if($('msg').textContent.startsWith('Sensore in attesa'))$('msg').textContent='Sensore attivo'}
+function finish(kind,rt){if(done)return;done=true;dbg();runId++;setT=0;
+if(kind==='ok'&&rt<100)kind='false';
+H.push({kind,rt});save();render();
+if(kind==='ok')ui(Math.round(rt)+' ms','Tempo di reazione','go');
+else if(kind==='false')ui(Math.round(rt)+' ms','Falsa partenza (< 100 ms)','set');
+else if(kind==='early'){speechSynthesis.cancel();ui('FALSA PARTENZA','Ti sei mosso prima dello sparo','set')}
+else if(kind==='none')ui('Nessun movimento',(blank?'Urto entro 90 ms dallo sparo, ignorato (vibrazione del telefono o anticipo). ':'')+'Picco dopo lo sparo: '+peak.toFixed(2)+' (soglia '+S.sens+')','');
+else ui('Fatto','Sequenza completata (sensore spento)','')}
+function render(){const ok=H.filter(h=>h.kind==='ok').map(h=>h.rt),l=H[H.length-1];
+$('last').textContent=l&&l.rt!=null?Math.round(l.rt):'—';
+$('best').textContent=ok.length?Math.round(Math.min(...ok)):'—';
+$('avg').textContent=ok.length?Math.round(ok.reduce((a,b)=>a+b)/ok.length):'—';
+$('hist').innerHTML=H.slice(-8).reverse().map(h=>`<li class="${h.kind==='ok'?'':'bad'}">${h.kind==='ok'?Math.round(h.rt)+' ms':h.kind==='early'?'Anticipata':h.kind==='false'?Math.round(h.rt)+' ms – falsa':h.kind==='manual'?'Solo audio (sensore spento)':'Nessun movimento'}</li>`).join('')}
+async function run(){abort();const id=++runId;initAudio();await enableMotion();
+try{wake=await navigator.wakeLock.request('screen')}catch(e){}
+prev=null;peak=0;blank=0;done=false;gunPerf=null;setT=0;const live=()=>id===runId;
+for(let s=Math.round(S.pre);s>0&&live();s--){ui(String(s),'Posiziona telefono e blocchi',''); await sleep(1000)}
+if(!live())return;
+ui('ON YOUR MARKS','Mettiti sul blocco','marks');const t0=await say('On your marks');
+const hold=(S.mMin+Math.random()*Math.max(0,S.mMax-S.mMin))*1000;await sleep(hold-(performance.now()-t0));if(!live())return;
+ui('SET','Fermo, aspetta lo sparo','set');const t1=await say('Set');if(!live())return;
+setT=t1;const gunT=t1+Math.min(2300,Math.max(1500,gauss(S.fp,.158)*1000));
+await sleep(gunT-100-performance.now());if(!live())return;
+gunPerf=playGun(gunT);await sleep(gunPerf-performance.now());if(!live())return;
+ui('GO!','','go');
+if(!motionOn||!prev){await sleep(1500);if(live())finish('manual',null);return}
+await sleep(2500);if(live()&&!done)finish('none',null)}
+$('go').onclick=run;$('stop').onclick=()=>{abort();try{wake&&wake.release()}catch(e){}ui('Pronto','Premi Avvia','')};
+$('clr').onclick=()=>{H=[];save();render()};render();
+</script></body></html>
